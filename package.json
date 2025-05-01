@@ -17,7 +17,13 @@
     "prepare": "husky",
     "commit": "git add . && cz",
     "release": "release-it",
-    "push": "git push origin HEAD"
+    "push": "git push origin HEAD",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
+    "inspect:stdio": "npx @modelcontextprotocol/inspector node dist/stdio.js",
+    "inspect:dev": "npx @modelcontextprotocol/inspector node --loader ts-node/esm src/index.ts",
+    "inspect:stdio:dev": "npx @modelcontextprotocol/inspector node --loader ts-node/esm src/stdio.ts",
+    "inspect:cli": "npx @modelcontextprotocol/inspector --cli node dist/index.js",
+    "inspect:stdio:cli": "npx @modelcontextprotocol/inspector --cli node dist/stdio.js"
   },
   "config": {
     "commitizen": {
@@ -44,6 +50,7 @@
     "@commitlint/cli": "^19.8.0",
     "@commitlint/config-conventional": "^19.8.0",
     "@eslint/js": "^9.25.1",
+    "@modelcontextprotocol/inspector": "^0.11.0",
     "@types/cors": "^2.8.13",
     "@types/express": "^4.17.17",
     "@types/jest": "^29.5.14",

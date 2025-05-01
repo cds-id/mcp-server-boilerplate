@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "http": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": {}
+    },
+    "http-dev": {
+      "command": "node",
+      "args": ["--loader", "ts-node/esm", "src/index.ts"],
+      "env": {}
+    },
+    "stdio": {
+      "command": "node",
+      "args": ["dist/stdio.js"],
+      "env": {}
+    },
+    "stdio-dev": {
+      "command": "node",
+      "args": ["--loader", "ts-node/esm", "src/stdio.ts"],
+      "env": {}
+    }
+  }
+}
