@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { randomUUID } from 'crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { registerResources } from './resources/index.js';
@@ -17,8 +18,9 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Map to store transports by session ID
-const transports: Record<string, StreamableHTTPServerTransport> = {};
+// Maps to store transports by session ID
+const streamableTransports: Record<string, StreamableHTTPServerTransport> = {};
+const sseTransports: Record<string, SSEServerTransport> = {};
 
 // Create a new MCP server instance
 const createServer = () => {
@@ -35,29 +37,29 @@ const createServer = () => {
   return server;
 };
 
-// Handle POST requests for client-to-server communication
+// Handle POST requests for client-to-server communication (normal HTTP JSON-RPC)
 app.post('/mcp', async (req, res) => {
   // Check for existing session ID
   const sessionId = req.headers['mcp-session-id'] as string | undefined;
   let transport: StreamableHTTPServerTransport;
 
-  if (sessionId && transports[sessionId]) {
+  if (sessionId && streamableTransports[sessionId]) {
     // Reuse existing transport
-    transport = transports[sessionId];
+    transport = streamableTransports[sessionId];
   } else if (!sessionId && isInitializeRequest(req.body)) {
     // New initialization request
     transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: sessionId => {
         // Store the transport by session ID
-        transports[sessionId] = transport;
+        streamableTransports[sessionId] = transport;
       },
     });
 
     // Clean up transport when closed
     transport.onclose = () => {
       if (transport.sessionId) {
-        delete transports[transport.sessionId];
+        delete streamableTransports[transport.sessionId];
       }
     };
 
@@ -81,27 +83,106 @@ app.post('/mcp', async (req, res) => {
   await transport.handleRequest(req, res, req.body);
 });
 
-// Handler for GET and DELETE requests
-const handleSessionRequest = async (req: express.Request, res: express.Response) => {
+// Handle GET requests for StreamableHTTP transport
+app.get('/mcp', async (req, res) => {
   const sessionId = req.headers['mcp-session-id'] as string | undefined;
-  if (!sessionId || !transports[sessionId]) {
+
+  if (!sessionId || !streamableTransports[sessionId]) {
     res.status(400).send('Invalid or missing session ID');
     return;
   }
 
-  const transport = transports[sessionId];
+  const transport = streamableTransports[sessionId];
   await transport.handleRequest(req, res);
-};
+});
 
-// Handle GET requests for server-to-client notifications via SSE
-app.get('/mcp', handleSessionRequest);
+// Handle DELETE requests for session termination (StreamableHTTP)
+app.delete('/mcp', async (req, res) => {
+  const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
-// Handle DELETE requests for session termination
-app.delete('/mcp', handleSessionRequest);
+  if (!sessionId) {
+    res.status(400).send('Missing session ID');
+    return;
+  }
+
+  if (streamableTransports[sessionId]) {
+    const transport = streamableTransports[sessionId];
+    await transport.handleRequest(req, res);
+    delete streamableTransports[sessionId];
+    return;
+  }
+
+  res.status(404).send('Session not found');
+});
+
+// SSE endpoint to establish a connection
+app.get('/sse/connect', async (req, res) => {
+  try {
+    // Set up SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    // Create SSE transport
+    const transport = new SSEServerTransport('/sse/messages', res);
+    const sessionId = transport.sessionId;
+
+    // Store the transport
+    sseTransports[sessionId] = transport;
+
+    // Handle connection close
+    res.on('close', () => {
+      delete sseTransports[sessionId];
+      console.log(`SSE connection closed for session ${sessionId}`);
+    });
+
+    // Create and connect to a new MCP server
+    const server = createServer();
+    await server.connect(transport);
+
+    // Send initialization message to client
+    transport.send({
+      jsonrpc: '2.0',
+      method: 'sse/connection',
+      params: {
+        sessionId,
+        message: 'Connection established',
+      },
+    });
+  } catch (error) {
+    console.error('Error setting up SSE connection:', error);
+    if (!res.headersSent) {
+      res.status(500).send('Error establishing SSE connection');
+    }
+  }
+});
+
+// Handle POST requests for SSE message sending
+app.post('/sse/messages', async (req, res) => {
+  const sessionId = req.query.sessionId as string;
+
+  if (!sessionId || !sseTransports[sessionId]) {
+    res.status(400).json({
+      error: 'Invalid or missing session ID',
+    });
+    return;
+  }
+
+  const transport = sseTransports[sessionId];
+  await transport.handlePostMessage(req, res, req.body);
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    activeSessions: {
+      streamable: Object.keys(streamableTransports).length,
+      sse: Object.keys(sseTransports).length,
+    },
+  });
 });
 
 // Start the server
@@ -109,7 +190,8 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`MCP Server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`MCP endpoint: http://localhost:${PORT}/mcp`);
+  console.log(`StreamableHTTP endpoint: http://localhost:${PORT}/mcp`);
+  console.log(`SSE connect endpoint: http://localhost:${PORT}/sse/connect`);
 });
 
 export default app;
