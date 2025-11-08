@@ -5,6 +5,10 @@
 
 A boilerplate server implementation for the Model Context Protocol (MCP), built with TypeScript and Express.
 
+<a href="https://glama.ai/mcp/servers/@cds-id/mcp-server-boilerplate">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@cds-id/mcp-server-boilerplate/badge" alt="Server Boilerplate MCP server" />
+</a>
+
 ## Table of Contents
 
 - [Overview](#overview)
